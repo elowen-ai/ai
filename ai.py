@@ -46,36 +46,14 @@ class LLMClient:
         self.client = AsyncOpenAI(base_url=cfg.base_url, api_key="EMPTY")
         self.model = cfg.model_name
 
-    async def stream_chat(self, messages: List[Dict[str, str]], **kwargs):
-        return await self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            stream=True,
-            **kwargs
-        )
-    
-    async def chat_once(self, messages: List[Dict[str, str]], **kwargs) -> str:
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            **kwargs
-        )
-        return (response.choices[0].message.content or "").strip()
-
-    # --- Fallback: completions (manual prompt) ---
     async def stream_completion(self, prompt: str, **kwargs):
         return await self.client.completions.create(
-            model=self.model,
-            prompt=prompt,
-            stream=True,
-            **kwargs
+            model=self.model, prompt=prompt, stream=True, **kwargs
         )
 
     async def completion_once(self, prompt: str, **kwargs) -> str:
         resp = await self.client.completions.create(
-            model=self.model,
-            prompt=prompt,
-            **kwargs
+            model=self.model, prompt=prompt, **kwargs
         )
         return (resp.choices[0].text or "").strip()
     
@@ -84,75 +62,76 @@ class RPFormatter:
     def __init__(self, prompt_manager: PromptManager):
         self.pm = prompt_manager
 
-    @staticmethod
-    def _san(text: str) -> str:
-        return (text or "").replace("<end_of_turn>", "< end_of_turn >").strip()
-
     def _preamble(self, character: Dict) -> str:
-        name = character["name"]
-        description = character["description"]
-        personality = character["personality"]
+        name = character.get("name", "")
+        description = character.get("description", "")
+        personality = character.get("personality", "")
         speaking_style = character.get("speakingStyle") or character.get("speaking_style") or ""
-        samples = character.get("samples", [])
-        char_prompt = self.pm.generate_character_prompt(
+        samples = character.get("samples", []) or []
+        card = self.pm.generate_character_prompt(
             name=name,
             description=description,
             personality=personality,
             speakingStyle=speaking_style,
             samples=samples,
         )
-        return self.pm.build_preamble(char_prompt)
+        return self.pm.build_preamble(card)
 
-    def build_first_user_message(self, character: Dict, user_input: str) -> List[Dict[str, str]]:
-        preamble = self._preamble(character)
-        user_text = self._san(user_input) + " Keep the response under 30–40 words."
-        return [{"role": "user", "content": f"{preamble}\n\n## Conversation Starts\n{user_text}"}]
+    @staticmethod
+    def _render_turns(hist: List[Dict[str, str]]) -> str:
+        # hist already sanitized to alternate, end with assistant
+        blocks = []
+        for m in hist:
+            role = (m.get("role") or "").lower()
+            content = (m.get("content") or "").strip()
+            if role in ("user", "assistant") and content:
+                blocks.append(f"<start_of_turn>{role}\n{content}\n<end_of_turn>")
+        return "\n".join(blocks)
 
-    def _assert_alternation_for_history(self, hist: List[Dict[str, str]]):
-        # history must be alternating and end with assistant (so we can append new user)
-        for i, m in enumerate(hist):
-            r = (m.get("role") or "").lower()
-            if i % 2 == 0 and r != "user":
-                raise ValueError("History must start with 'user' and alternate.")
-            if i % 2 == 1 and r != "assistant":
-                raise ValueError("History must alternate user/assistant.")
-        if hist and (hist[-1].get("role") or "").lower() != "assistant":
-            raise ValueError("History must end with 'assistant' before appending the new user turn.")
-
-    def build_messages_with_preamble_every_time(
-        self,
-        character: Dict,
-        user_input: str,
-        history: Optional[List[Dict[str, str]]]
-    ) -> List[Dict[str, str]]:
-        
-        hist = history or []
-        hist = [{"role": (m["role"]).lower(), "content": self._san(m.get("content", ""))} for m in hist]
-
-        if not hist:
-            return self.build_first_user_message(character, user_input)
-
-        self._assert_alternation_for_history(hist)
-
-        if not hist[0]["content"].lstrip().startswith("## System Instructions"):
-            hist[0]["content"] = f"{self._preamble(character)}\n\n{hist[0]['content'].strip()}"
-
-        hist.append({"role": "user", "content": self._san(user_input)})
-
-        if hist[-1]["role"] != "user":
-            raise ValueError("Final message must be 'user'.")
-        return hist
-
-    # manual prompt for fallback on the very first turn only
-    def build_manual_prompt(self, character: Dict, user_input: str) -> str:
+    def build_manual_prompt(self, character: Dict, history: List[Dict[str, str]], user_input: str) -> str:
         pre = self._preamble(character)
+        hist_txt = self._render_turns(history)
+        ui = (user_input or "").strip()
         return (
             "<start_of_turn>user\n"
-            f"{pre}\n\n## Conversation Starts\n{self._san(user_input)}\n"
+            f"{pre}\n\n"
+            "## Conversation So Far\n"
+            f"{hist_txt}\n"
+            "## Conversation Continues\n"
+            f"{ui}\n"
             "<end_of_turn>\n"
             "<start_of_turn>model\n"
         )
 
+# --------- HISTORY SANITIZER ---------
+def sanitize_history(raw_hist: Optional[List[Dict[str, str]]], max_pairs: int = 10) -> List[Dict[str, str]]:
+    clean = []
+    for m in (raw_hist or []):
+        role = (m.get("role") or "").lower()
+        content = (m.get("content") or "").strip()
+        if role in ("user", "assistant") and content:
+            clean.append({"role": role, "content": content})
+
+    # force start with user
+    while clean and clean[0]["role"] != "user":
+        clean.pop(0)
+
+    out, expect = [], "user"
+    for m in clean:
+        if m["role"] == expect:
+            out.append(m)
+            expect = "assistant" if expect == "user" else "user"
+
+    # must end with assistant
+    if out and out[-1]["role"] != "assistant":
+        out = out[:-1]
+
+    # keep only last N pairs
+    if len(out) > 2 * max_pairs:
+        out = out[-2 * max_pairs :]
+
+    return out
+    
 # --------------SOCKET.IO SERVER----------
 class RPServer:
     def __init__(self, llm: LLMClient, formatter: RPFormatter, defaults: GenDefaults):
@@ -161,6 +140,8 @@ class RPServer:
             cors_allowed_origins="*",
             ping_interval=25,
             ping_timeout=60,
+            logger=True,            
+            engineio_logger=True,
         )
         self.app = socketio.ASGIApp(self.sio)
         self.llm = llm
@@ -171,6 +152,7 @@ class RPServer:
     def _register_events(self):
         @self.sio.event
         async def connect(sid, environ):
+            print(f"[SIO] CONNECTED: {sid}", flush=True)
             await self.sio.emit("gpu_connected", {"ok": True}, to=sid)
 
         @self.sio.on("rp_start")
@@ -178,40 +160,20 @@ class RPServer:
             rid = data.get("request_id", "")
             try:
                 kwargs = self.defaults.as_kwargs()
+                character = data["character"]
+                user_input = data["user_input"]
+                history = sanitize_history(data.get("history"))
 
-                messages = self.fmt.build_messages_with_preamble_every_time(
-                    character=data["character"],
-                    user_input=data["user_input"],
-                    history=data.get("history"),
-                )
+                prompt = self.fmt.build_manual_prompt(character, history, user_input)
+                stream = await self.llm.stream_completion(prompt, **kwargs)
 
-                try:
-                    stream = await self.llm.stream_chat(messages, **kwargs)
-                    full = []
-                    async for chunk in stream:
-                        delta = chunk.choices[0].delta.content if chunk.choices and chunk.choices[0].delta else None
-                        if not delta:
-                            continue
-                        full.append(delta)
-                        await self.sio.emit("rp_token", {"request_id": rid, "token": delta}, to=sid)
-                    await self.sio.emit("rp_done", {"request_id": rid, "text": "".join(full).strip()}, to=sid)
-                    return
-                except BadRequestError as bre:
-                    # Only fall back for alternation error on the *first* turn (no history)
-                    msg = (getattr(bre, "message", None) or str(bre)).lower()
-                    if "conversation roles must alternate" in msg and not data.get("history"):
-                        prompt = self.fmt.build_manual_prompt(data["character"], data["user_input"])
-                        stream = await self.llm.stream_completion(prompt, **kwargs)
-                        full = []
-                        async for chunk in stream:
-                            tok = chunk.choices[0].text if (chunk.choices and chunk.choices[0].text) else None
-                            if not tok:
-                                continue
-                            full.append(tok)
-                            await self.sio.emit("rp_token", {"request_id": rid, "token": tok}, to=sid)
-                        await self.sio.emit("rp_done", {"request_id": rid, "text": "".join(full).strip()}, to=sid)
-                        return
-                    raise
+                full = []
+                async for chunk in stream:
+                    tok = chunk.choices[0].text if (chunk.choices and chunk.choices[0].text) else None
+                    if tok:
+                        full.append(tok)
+                        await self.sio.emit("rp_token", {"request_id": rid, "token": tok}, to=sid)
+                await self.sio.emit("rp_done", {"request_id": rid, "text": "".join(full).strip()}, to=sid)
 
             except Exception as e:
                 await self.sio.emit("rp_error", {"request_id": rid, "message": str(e)}, to=sid)
@@ -221,40 +183,21 @@ class RPServer:
             rid = data.get("request_id", "")
             try:
                 kwargs = self.defaults.as_kwargs()
+                character = data["character"]
+                user_input = data["user_input"]
+                history = sanitize_history(data.get("history"))
 
-                messages = self.fmt.build_messages_with_preamble_every_time(
-                    character=data["character"],
-                    user_input=data["user_input"],
-                    history=data.get("history"),
-                )
+                prompt = self.fmt.build_manual_prompt(character, history, user_input)
+                text = await self.llm.completion_once(prompt, **kwargs)
+                await self.sio.emit("rp_once_result", {"request_id": rid, "text": text}, to=sid)
 
-                try:
-                    text = await self.llm.chat_once(messages, **kwargs)
-                    await self.sio.emit("rp_once_result", {"request_id": rid, "text": text}, to=sid)
-                    return
-                except BadRequestError as bre:
-                    msg = (getattr(bre, "message", None) or str(bre)).lower()
-                    if "conversation roles must alternate" in msg and not data.get("history"):
-                        prompt = self.fmt.build_manual_prompt(data["character"], data["user_input"])
-                        text = await self.llm.completion_once(prompt, **kwargs)
-                        await self.sio.emit("rp_once_result", {"request_id": rid, "text": text}, to=sid)
-                        return
-                    raise
             except Exception as e:
                 await self.sio.emit("rp_error", {"request_id": rid, "message": str(e)}, to=sid)
 
 # ----------ASSEMBLE APP-----------
 def create_app() -> socketio.ASGIApp:
     cfg = ModelConfig()
-    defaults = GenDefaults(
-        temperature=0.9,
-        top_p=0.9,
-        max_tokens=1024,
-        stop=["<end_of_turn>"],
-        frequency_penalty=0.2,
-        presence_penalty=0.2,
-        extra_body={"repetition_penalty": 1.08},
-    )
+    defaults = GenDefaults()
     llm = LLMClient(cfg)
     formatter = RPFormatter(PromptManager())
     server = RPServer(llm, formatter, defaults)

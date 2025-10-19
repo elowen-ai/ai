@@ -84,8 +84,8 @@ async def main():
             "character": CHARACTER,
             "user_input": user_input,
             "history": [
-                {"role":"user", "content":""},
-                {"role":"assistant", "content":""},
+                {"role" : "user", "content": ""},
+                {"role" : "assistant", "content": ""}
             ]
         }
 

@@ -1,6 +1,6 @@
 from transformers import PreTrainedTokenizerFast
 
-SRC = "tokenizer/tokenizer.json" # tokenizer.json path
+SRC = "tokenizer.json" # tokenizer.json path
 DST = "tokenizer.fixed" # new output folder
 
 CHAT_TEMPLATE = r"""{{- bos_token -}}
