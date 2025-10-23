@@ -1,11 +1,10 @@
-from dataclasses import dataclass, field
-from typing import Dict, Optional, List, Any
-from openai import AsyncOpenAI, BadRequestError
 from prompts import PromptManager
+from dataclasses import dataclass, field
+from openai import AsyncOpenAI, AsyncStream
+from openai.types.completion import Completion
+from typing import Dict, Literal, Optional, List, Any
 
-import socketio
-
-# ----CONFIGURATION------
+# ----------- CONFIGURATION -----------
 @dataclass(frozen=True)
 class ModelConfig:
     base_url: str = "http://localhost:8000/v1"
@@ -40,13 +39,13 @@ class GenDefaults:
             kw["extra_body"] = self.extra_body
         return kw
 
-# ----------- LLM WRAPPER -------
+# ----------- LLM WRAPPER -----------
 class LLMClient:
     def __init__(self, cfg: ModelConfig):
         self.client = AsyncOpenAI(base_url=cfg.base_url, api_key="EMPTY")
         self.model = cfg.model_name
 
-    async def stream_completion(self, prompt: str, **kwargs):
+    async def stream_completion(self, prompt: str, **kwargs) -> AsyncStream[Completion]:
         return await self.client.completions.create(
             model=self.model, prompt=prompt, stream=True, **kwargs
         )
@@ -57,7 +56,7 @@ class LLMClient:
         )
         return (resp.choices[0].text or "").strip()
     
-# ---------- PROMPT BUILDER ----------
+# ----------- PROMPT BUILDER -----------
 class RPFormatter:
     def __init__(self, prompt_manager: PromptManager):
         self.pm = prompt_manager
@@ -103,7 +102,7 @@ class RPFormatter:
             "<start_of_turn>model\n"
         )
 
-# --------- HISTORY SANITIZER ---------
+# ----------- HISTORY SANITIZER -----------
 def sanitize_history(raw_hist: Optional[List[Dict[str, str]]], max_pairs: int = 10) -> List[Dict[str, str]]:
     clean = []
     for m in (raw_hist or []):
@@ -120,7 +119,7 @@ def sanitize_history(raw_hist: Optional[List[Dict[str, str]]], max_pairs: int = 
     for m in clean:
         if m["role"] == expect:
             out.append(m)
-            expect = "assistant" if expect == "user" else "user"
+            expect: Literal['assistant'] | Literal['user'] = "assistant" if expect == "user" else "user"
 
     # must end with assistant
     if out and out[-1]["role"] != "assistant":
@@ -131,76 +130,3 @@ def sanitize_history(raw_hist: Optional[List[Dict[str, str]]], max_pairs: int = 
         out = out[-2 * max_pairs :]
 
     return out
-    
-# --------------SOCKET.IO SERVER----------
-class RPServer:
-    def __init__(self, llm: LLMClient, formatter: RPFormatter, defaults: GenDefaults):
-        self.sio = socketio.AsyncServer(
-            async_mode="asgi",
-            cors_allowed_origins="*",
-            ping_interval=25,
-            ping_timeout=60,
-            logger=True,            
-            engineio_logger=True,
-        )
-        self.app = socketio.ASGIApp(self.sio)
-        self.llm = llm
-        self.fmt = formatter
-        self.defaults = defaults
-        self._register_events()
-
-    def _register_events(self):
-        @self.sio.event
-        async def connect(sid, environ):
-            print(f"[SIO] CONNECTED: {sid}", flush=True)
-            await self.sio.emit("gpu_connected", {"ok": True}, to=sid)
-
-        @self.sio.on("rp_start")
-        async def rp_start(sid, data):
-            rid = data.get("request_id", "")
-            try:
-                kwargs = self.defaults.as_kwargs()
-                character = data["character"]
-                user_input = data["user_input"]
-                history = sanitize_history(data.get("history"))
-
-                prompt = self.fmt.build_manual_prompt(character, history, user_input)
-                stream = await self.llm.stream_completion(prompt, **kwargs)
-
-                full = []
-                async for chunk in stream:
-                    tok = chunk.choices[0].text if (chunk.choices and chunk.choices[0].text) else None
-                    if tok:
-                        full.append(tok)
-                        await self.sio.emit("rp_token", {"request_id": rid, "token": tok}, to=sid)
-                await self.sio.emit("rp_done", {"request_id": rid, "text": "".join(full).strip()}, to=sid)
-
-            except Exception as e:
-                await self.sio.emit("rp_error", {"request_id": rid, "message": str(e)}, to=sid)
-
-        @self.sio.on("rp_once")
-        async def rp_once(sid, data):
-            rid = data.get("request_id", "")
-            try:
-                kwargs = self.defaults.as_kwargs()
-                character = data["character"]
-                user_input = data["user_input"]
-                history = sanitize_history(data.get("history"))
-
-                prompt = self.fmt.build_manual_prompt(character, history, user_input)
-                text = await self.llm.completion_once(prompt, **kwargs)
-                await self.sio.emit("rp_once_result", {"request_id": rid, "text": text}, to=sid)
-
-            except Exception as e:
-                await self.sio.emit("rp_error", {"request_id": rid, "message": str(e)}, to=sid)
-
-# ----------ASSEMBLE APP-----------
-def create_app() -> socketio.ASGIApp:
-    cfg = ModelConfig()
-    defaults = GenDefaults()
-    llm = LLMClient(cfg)
-    formatter = RPFormatter(PromptManager())
-    server = RPServer(llm, formatter, defaults)
-    return server.app
-
-app = create_app()

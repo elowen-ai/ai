@@ -1,0 +1,6 @@
+vllm==0.11.0
+python-dotenv==1.1.1
+uvicorn[standard]
+python-socketio[asgi]
+openai>=1.40.0
+PyJWT==2.10.1

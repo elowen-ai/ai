@@ -1,3 +1,5 @@
+# RP test without authentication
+
 import asyncio
 import socketio
 import uuid
