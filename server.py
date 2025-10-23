@@ -77,6 +77,22 @@ class RPServer:
             except Exception as e:
                 await self.sio.emit("rp_error", {"request_id": rid, "message": str(e)}, to=sid)
 
+        @self.sio.on("rp_twitter")
+        @auth.isAuthenticated
+        async def rp_twitter(sid, data):
+            rid = data.get("request_id", "")
+            try:
+                kwargs = self.defaults.as_kwargs()
+                character = data["character"]
+                previous_mentions = data.get("previous_mentions", "")
+
+                prompt = self.fmt.build_twitter_prompt(character, previous_mentions)
+                text = await self.llm.completion_once(prompt, **kwargs)
+                await self.sio.emit("rp_twitter_result", {"request_id": rid, "text": text}, to=sid)
+
+            except Exception as e:
+                await self.sio.emit("rp_error", {"request_id": rid, "message": str(e)}, to=sid)
+
 def create_app() -> socketio.ASGIApp:
     cfg = ModelConfig()
 

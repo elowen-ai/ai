@@ -76,6 +76,35 @@ class RPFormatter:
         )
         return self.pm.build_preamble(card)
 
+    def build_twitter_prompt(self, character: Dict, previous_mentions: str) -> str:
+        name = character.get("name", "")
+        description = character.get("description", "")
+        personality = character.get("personality", "")
+        speaking_style = character.get("speakingStyle") or character.get("speaking_style") or ""
+        samples = character.get("samples", []) or []
+
+        card = self.pm.generate_character_prompt(
+            name=name,
+            description=description,
+            personality=personality,
+            speakingStyle=speaking_style,
+            samples=samples,
+        )
+
+        pre = self.pm.build_twitter_preamble(card)
+        mentions = (previous_mentions or "").strip()
+
+        return (
+            "<start_of_turn>user\n"
+            f"{pre}\n\n"
+            "## Previous Mentions\n"
+            f"{mentions}\n"
+            "## Reply\n"
+            "Compose your in-character reply to the latest mention only.\n"
+            "<end_of_turn>\n"
+            "<start_of_turn>model\n"
+        )
+
     @staticmethod
     def _render_turns(hist: List[Dict[str, str]]) -> str:
         # hist already sanitized to alternate, end with assistant
