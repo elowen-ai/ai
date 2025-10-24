@@ -13,7 +13,7 @@ class RPServer:
             cors_allowed_origins="*",
             ping_interval=25,
             ping_timeout=60,
-            logger=True,            
+            logger=True,
             engineio_logger=True,
         )
         self.app: socketio.ASGIApp[socketio.AsyncServer] = socketio.ASGIApp(self.sio)
@@ -24,17 +24,25 @@ class RPServer:
 
     def _register_events(self):
         @self.sio.event
-        async def connect(sid, data, authData):
-            print(f"[SIO] TRIES TO CONNECT: {sid}", flush=True)
-            response = auth.authenticate(sid, authData)
+        async def connect(sid, environ):
+            try:
+                print(f"[SIO] TRIES TO CONNECT: {sid}", flush=True)
+                auth_header = environ.get("HTTP_AUTHORIZATION")
 
-            if response.get("status") is False:
+                if auth_header and auth_header.startswith("Bearer "):
+                    token = auth_header.split(" ", 1)[1]
+                else: return False
+
+                response = auth.authenticate(sid, { "token": token })
+                if response.get("status") is False: return False
+
+                print("Client connected:", sid)
+                print("Successfully authenticated")
+
                 return response
-
-            print("Client connected:", sid)
-            print("Successfully authenticated")
-
-            return response
+            except Exception as e:
+                print(f"Connection error for {sid}: {str(e)}", flush=True)
+                return False
 
         @self.sio.on("rp_start")
         @auth.isAuthenticated

@@ -11,10 +11,10 @@ JWT_SECRET: str | None = os.getenv("JWT_SECRET")
 class Auth:
     sessions: list = []
 
-    def authenticate(self, sid, authData) -> bool:
+    def authenticate(self, sid, authData) -> dict[str, Any]:
         if not authData or not sid:
             return { "status": False, "message": "No auth data provided" }
-        
+
         token: str | None = authData.get('token') if authData else None
         if not token: return { "status": False, "message": "No token provided" }
 
@@ -30,7 +30,7 @@ class Auth:
         self.sessions.append(sid)
         return { "status": True }
 
-    def isAuthenticated(self, f) -> bool:
+    def isAuthenticated(self, f) -> Any:
         @wraps(f)
         def wrapper(sid) -> dict[str, Any] | Any:
             if not sid in self.sessions:
