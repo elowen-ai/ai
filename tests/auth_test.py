@@ -40,12 +40,12 @@ async def server():
 
     @sio.on("ping")
     @auth.isAuthenticated
-    def ping(sid):
-        sio.emit("pong", { "message": "pong" }, to=sid)
+    def ping(sid, data):
+        sio.emit("pong", { "message": "pong", "data": data }, to=sid)
         print(f"[SIO] SENT PONG: {sid}", flush=True)
 
     def run_flask():
-        app.run(host="127.0.0.1", port=5000, use_reloader=False)
+        app.run(host="127.0.0.1", port=5005, use_reloader=False)
 
     threading.Thread(target=run_flask, daemon=True).start()
     await asyncio.sleep(0.5)
@@ -66,8 +66,8 @@ async def client():
         print(f"[client] received pong: {msg}", flush=True)
         got_pong.set()
 
-    await sio.connect("http://localhost:5000", auth={"token": os.getenv("TEST_JWT_TOKEN")})
-    await sio.emit("ping")
+    await sio.connect("http://localhost:5005", auth={"token": os.getenv("TEST_JWT_TOKEN")})
+    await sio.emit("ping", { "extraMessage": "Ping!!" })
     await got_pong.wait()
 
 async def main():

@@ -32,8 +32,7 @@ class Auth:
 
     def isAuthenticated(self, f) -> Any:
         @wraps(f)
-        def wrapper(sid) -> dict[str, Any] | Any:
-            if not sid in self.sessions:
-                return { "status": False, "message": "Not authenticated" }
-            return f(sid)
+        def wrapper(sid, *args, **kwargs) -> dict[str, Any] | Any:
+            if not sid in self.sessions: return False
+            return f(sid, *args, **kwargs)
         return wrapper
