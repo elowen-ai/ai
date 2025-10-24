@@ -1,3 +1,4 @@
+## Manual Installation and Serving Instructions
 Install the tokenizer: [Big-Tiger-Gemma-27B-v1/blob/main/tokenizer.json](https://huggingface.co/TheDrummer/Big-Tiger-Gemma-27B-v1/blob/main/tokenizer.json)
 
 Run the tokenizer fixing script:
@@ -13,4 +14,4 @@ python -m vllm.entrypoints.openai.api_server \
   --port 8000
 ```
 
-Serve the app: `uvicorn ai:app --host 0.0.0.0 --port 8001 --reload`
+Serve the app: `uvicorn server:app --host 0.0.0.0 --port 8001 --reload`
