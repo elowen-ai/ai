@@ -1,13 +1,14 @@
-from prompts import PromptManager
+from app.prompts import PromptManager
 from dataclasses import dataclass, field
 from openai import AsyncOpenAI, AsyncStream
 from openai.types.completion import Completion
 from typing import Dict, Literal, Optional, List, Any
+import os
 
 # ----------- CONFIGURATION -----------
 @dataclass(frozen=True)
 class ModelConfig:
-    base_url: str = "http://localhost:8000/v1"
+    base_url: str = os.getenv("VLLM_BASE_URL", "http://vllm:4001/v1")
     model_name: str = "TheDrummer/Big-Tiger-Gemma-27B-v1"
 
 @dataclass

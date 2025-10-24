@@ -1,0 +1,45 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: >
+      sh -lc "python /workspace/app/fix_tokenizer.py &&
+      uvicorn server:app --host 0.0.0.0 --port 4002 --reload"
+    environment:
+      - TOKENIZER_SRC=/workspace/app/tokenizer.json
+      - TOKENIZER_OUT_DIR=/tokenizer
+      - VLLM_BASE_URL=http://vllm:4001/v1
+      - PYTHONUNBUFFERED=1
+      - TRANSFORMERS_NO_PYTORCH=1
+      - TRANSFORMERS_NO_TF=1
+      - TRANSFORMERS_NO_FLAX=1
+    ports:
+      - "4002:4002"
+    volumes:
+      - tokenizer_store:/tokenizer
+      - .:/workspace
+    working_dir: /workspace
+    restart: unless-stopped
+
+  vllm:
+    image: vllm/vllm-openai:latest
+    gpus: all
+    command: >
+      python -m vllm.entrypoints.openai.api_server
+      --model "TheDrummer/Big-Tiger-Gemma-27B-v1"
+      --tokenizer /tokenizer/tokenizer.fixed
+      --dtype auto
+      --max-model-len 8192
+      --port 4001
+    ports:
+      - "4001:4001"
+    volumes:
+      - tokenizer_store:/tokenizer
+      - vllm_cache:/root/.cache
+    shm_size: "2g"
+    restart: unless-stopped
+
+volumes:
+  tokenizer_store:
+  vllm_cache:

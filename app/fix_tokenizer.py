@@ -1,7 +1,9 @@
 from transformers import PreTrainedTokenizerFast
+import os
 
-SRC = "tokenizer.json" # tokenizer.json path
-DST = "tokenizer.fixed" # new output folder
+SRC = os.getenv("TOKENIZER_SRC", "/workspace/app/tokenizer.json")
+DST_DIR = os.getenv("TOKENIZER_OUT_DIR", "/tokenizer")
+DST = os.path.join(DST_DIR, "tokenizer.fixed")
 
 CHAT_TEMPLATE = r"""{{- bos_token -}}
 {%- if messages[0]["role"] == "system" -%}
@@ -42,5 +44,7 @@ if tok.pad_token is None:
 
 # Attach template and save
 tok.chat_template = CHAT_TEMPLATE
+os.makedirs(DST_DIR, exist_ok=True)
 tok.save_pretrained(DST)
-print("Tokenizer path", DST)
+print("Tokenizer src:", SRC)
+print("Tokenizer path:", DST)

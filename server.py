@@ -1,8 +1,8 @@
 import socketio
 
 from auth import Auth
-from prompts import PromptManager
-from ai import GenDefaults, LLMClient, ModelConfig, RPFormatter, sanitize_history
+from app.prompts import PromptManager
+from app.ai import GenDefaults, LLMClient, ModelConfig, RPFormatter, sanitize_history
 
 auth = Auth()
 
