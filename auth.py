@@ -1,8 +1,9 @@
 import os
 import jwt
-from typing import Any
+import asyncio
 from functools import wraps
 from dotenv import load_dotenv
+from typing import Any, Callable
 
 load_dotenv()
 
@@ -30,9 +31,19 @@ class Auth:
         self.sessions.append(sid)
         return { "status": True }
 
-    def isAuthenticated(self, f) -> Any:
+    def isAuthenticated(self, f: Callable) -> Callable:
         @wraps(f)
-        def wrapper(sid, *args, **kwargs) -> dict[str, Any] | Any:
-            if not sid in self.sessions: return False
+        async def async_wrapper(sid, *args, **kwargs) -> Any:
+            if sid not in self.sessions:
+                return {"status": False, "message": "Not authenticated"}
+            return await f(sid, *args, **kwargs)
+
+        @wraps(f)
+        def sync_wrapper(sid, *args, **kwargs) -> Any:
+            if sid not in self.sessions:
+                return {"status": False, "message": "Not authenticated"}
             return f(sid, *args, **kwargs)
-        return wrapper
+
+        if asyncio.iscoroutinefunction(f):
+            return async_wrapper
+        return sync_wrapper
