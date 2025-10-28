@@ -8,7 +8,7 @@ import os
 # ----------- CONFIGURATION -----------
 @dataclass(frozen=True)
 class ModelConfig:
-    base_url: str = os.getenv("VLLM_BASE_URL", "http://vllm:4001/v1")
+    base_url: str = os.getenv("VLLM_BASE_URL", "http://0.0.0.0:4001/v1")
     model_name: str = "TheDrummer/Big-Tiger-Gemma-27B-v1"
 
 @dataclass
